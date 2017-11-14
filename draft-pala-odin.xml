@@ -1,0 +1,456 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE rfc SYSTEM 'rfc2629.dtd' [
+	<!ENTITY rfc5234 PUBLIC '' 'http://xml.resource.org/public/rfc/bibxml/reference.RFC.5234.xml'>
+	<!ENTITY rfc3986 PUBLIC '' 'http://xml.resource.org/public/rfc/bibxml/reference.RFC.3986.xml'>
+	<!ENTITY rfc2119 PUBLIC '' 'http://xml.resource.org/public/rfc/bibxml/reference.RFC.2119.xml'>
+	<!ENTITY rfc2560 PUBLIC '' 'http://xml.resource.org/public/rfc/bibxml/reference.RFC.6960.xml'>
+	<!ENTITY rfc5019 PUBLIC '' 'http://xml.resource.org/public/rfc/bibxml/reference.RFC.5019.xml'>
+	<!ENTITY rfc5280 PUBLIC '' 'http://xml.resource.org/public/rfc/bibxml/reference.RFC.5280.xml'>
+	<!ENTITY rfc4501 PUBLIC '' 'http://xml.resource.org/public/rfc/bibxml/reference.RFC.4501.xml'>
+]>
+
+<rfc category="exp" docName="draft-pala-odin-03" ipr="trust200902">
+    
+<?xml-stylesheet type='text/xsl' href='rfc2629.xslt' ?>
+
+<?rfc toc="yes" ?>
+<?rfc tocdepth="5"?>
+<?rfc symrefs="yes" ?>
+<?rfc sortrefs="yes"?>
+<?rfc iprnotified="no" ?>
+<?rfc strict="yes" ?>
+<?rfc compact="yes" ?>
+<?rfc subcompact="no" ?>
+
+  <front>
+  <title abbrev="OOD">OCSP over DNS (ODIN)</title>
+  <author initials="M.P." surname="Pala" fullname="Massimiliano Pala">
+    <organization>CableLabs</organization>
+    <address>
+      <postal>
+        <street>858 Coal Creek Cir</street>
+        <city>Louisville</city>
+        <region>CO</region>
+        <code>80027</code>
+        <country>US</country>
+      </postal>
+      <email>m.pala@cablelabs.com</email>
+      <uri>http://www.linkedin.com/in/mpala</uri>
+    </address>
+  </author>
+ 
+  <date month="November" year="2017" />
+  <area>Security</area>
+  <workgroup></workgroup>
+  <keyword>PKI</keyword>
+  <keyword>Revocation</keyword>
+  <keyword>OCSP</keyword>
+  <abstract>
+    <t>
+    	With the increase number of protocols and applications that rely on digital certificates
+    	to authenticate either the communication channel (TLS) or the data itself (PKIX), the need
+    	for providing an efficient revocation system is paramount. Although the Online
+    	Certificate Status Protocol (OCSP) allows for efficient lookup of
+    	the revocation status of a certificate, the distribution of this information via HTTP (or
+    	very rarely) HTTPS is not particularly efficient for high volume websites without incurring
+    	in high distribution costs (e.g., CDN).
+    
+   		<vspace blankLines="1" />
+
+   		In particular, this specification defines how to distribute OCSP responses over DNS
+   		and how to define OCSP-over-DNS URLs in certificates.
+
+   		The use of the DNS system to distribute such information is meant to lower the costs of
+   		providing revocation services (by leveraging the distributed nature of DNS cache) and
+   		increase the availability of revocation information (by providing an additional access
+   		method for revocation information retrieval). 
+   </t>
+  </abstract>
+</front>
+
+<middle>
+
+	<section title="Requirements notation">
+		<t>
+			The key words "MUST", "MUST NOT", "REQUIRED", "SHALL",
+			"SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY",
+			and "OPTIONAL" in this document are to be interpreted as
+			described in <xref target="RFC2119"/>.
+		</t>
+	</section>
+
+	<section anchor="intro" title="Introduction"> 
+		<t>
+			With the increasing number of highly available and highly utilized websites that 
+			require secure communications to protect the flow of information from the server 
+			to the client and the raising number of devices (IoT) that require strong authentication
+			capabilities, the need for a low-cost efficient approach to revocation information 
+			availability is	crucial.
+
+			The OCSP-over-DNS approach allows clients to determine the revocation status of digital
+			certificates by optimizing the delivery mechanism for revocation information
+			distribution to the client.
+			This transport protocol can be used in lieu of or in addition to other PKIX endorsed
+			transport mechanisms such as HTTP.
+
+			This specification addresses the problem of providing a highly-available distributed system
+			for OCSP responses <xref target="RFC6960" />.
+			
+			<vspace blankLines="1" />
+
+			This document defines the DNS records to be used for OCSP data publication and the
+			definition of additional URLs for the AuthorityInfoAccess (AIA) extension in certificates.
+
+<!--
+One solution is to provide a small response that can fit into a single UDP datagram.    Data signed (chain needs to be short.)    While the theoretical limit of a UDP datagram is 65,535 bytes (8 byte header + 65527 bytes of data), the generally accepted payload size for a UDP packet is 512 bytes.  (If a packet is broken up then you get problems associated with fragmentation, etc.)  For example, DNS is provided via UDP with a packet size of 512 bytes, and many applications set 512 bytes as the limit.  
+Sign data that the client can provide, using the same approach you don’t have to include the chain 
+-->
+		</t>
+	</section>
+
+	<section anchor="existing_solutions" title="Overview of existing solutions">
+		<t>
+			Currently there are three main options to retrieve the revocation information associated
+			with a digital certificates:
+
+			<list style="symbols">
+   				<t>by retrieving the freshest CRL</t>
+   				<t>by querying an OCSP responder for a freshly computed response</t>
+   				<t>by retrieving a pre-signed OCSP response from a web site
+      			   (typically a content distribution network or CDN)</t>
+      			<t>by verifying pre-computed OCSP responses embedded (stapled) during
+      			   the TLS negotiation (only in the TLS case, though)</t>
+      		</list>
+
+			All of these methods are based on the ability from the application to
+			extract URLs out of the CRL (CrlDistributionPoint) or of the OCSP
+			responder (AuthorityInfoAccess) from the certificate and query
+			(almost uniquely via HTTP/HTTPS, although supported protocols might
+			include LDAP and FTP) the corresponding server to retrieve the
+			required data.
+		</t>
+	</section>
+
+	<section anchor="scope" title="Scope Statement">
+		<t>
+			This document focuses only on the definition of the required options
+			for providing OCSP responses over DNS as an alternative transport
+			protocol.  The reliability and accessibility of DNS records (e.g.,
+			issues related to TCP vs. UDP DNS responses) are out of the scope of
+			this document.
+		</t>
+	</section>
+
+	<section title="Protocol Overview">
+		<t>
+			In order to validate a certificate using OCSP-over-DNS, the client should
+			check the certificate for a DNS-based OCSP URI ("dns://") and then retrieve
+			the OCSP response from the DNS.
+			After this point, all procedures are to be performed according to the OCSP
+			protocol as defined in <xref target="RFC5019"/>.
+   
+			In particular, clients using OCSP-over-DNS, SHOULD:
+			<list style="numbers">
+				<t> 
+					Lookup the OCSP URI provided in the AIA of the certificate to be checked.
+					The format of the URI comprises the id-ad-ocsp identifier and a base URL
+					where the scheme (``dns://'') is used.
+					The format of the full URI is discussed in <xref target="uri" />.
+				</t>
+				<t>
+					Retrieve the DNS record carrying the required OCSP response.
+				</t>
+			</list>
+ 
+		</t>
+	</section>
+
+	<section anchor="ocsprr" title="The OCSP Resource Record (OCSPRR)">
+		<t>
+			The OCSP DNS resource record (RR) is used to distribute a certificate's
+			revocation status to clients.  The contents of the OCSP RR record are
+			described in <xref target="rdata" />. 
+		</t>
+		
+		<t>
+			The type value for the OCSP RR type is defined in <xref target="rtype" />.
+		</t>
+		
+		<t>
+   			The OCSP RR is class independent.
+   		</t>
+
+   		<t>
+   			The OCSP RR Time to Live (TTL) should not exceed the validity period
+   			of the OCSP response that is contained in the record.
+   		</t>
+
+		<section anchor="rdata" title="The OCSP RDATA Wire Format">
+			<t>
+				The RDATA for an OCSP RR consists of a single field which carries the
+				DER encoded OCSP response for the identified certificate.
+			</t>
+    <figure><artwork>
+                         1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                                                               /
+    +                       OCSP Response Data                      /
+    /                                                               /
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    </artwork></figure>
+
+      		<t>
+      			The OCSP response should contain only one response that refers to the
+      			certificate which contains that URL.  Following this schema, the OCSP
+      			DNS URIs within the AIA extension SHOULD be unique for each certificate
+      			issued by a single CA.
+			</t>
+
+		</section>
+
+		<section anchor="rtype" title="The OCSP RRType">
+			<t>
+				This document uses a new DNS RR type, OCSP, whose value (TBD) was
+				allocated by IANA from the Resource Record (RR) TYPEs subregistry of
+				the Domain Name System (DNS) Parameters registry.
+			</t>
+		</section>
+
+		<section anchor="time" title="Time Validity">
+			<t>
+				The time validity should reflect the frequency of updates in revocation
+				information (i.e., the TTL should not be set to expire after the OCSP
+				response expiration). In practice, as an operational matter, operators
+				SHOULD ensure that the records are published in a way that the TTL is
+				low enough that they expire from caches before the OCSP response
+				expiration.
+			</t>
+	</section>
+
+	</section>
+
+	<section anchor="uri" title="Specifying DNS URLs for OCSP RR">
+		<t>
+			The Authority Information Access extension, as defined in <xref target="RFC5280" />,
+			provides information about the certificate in which the extension appears.  In order
+			to specify the availability of OCSP responses over DNS, Certification Authorities
+			should use the OCSP accessMethod OID (id-ad-ocsp) and use "dns" as the transport.
+   		</t>
+   			<!-- @deprecated: The use of a new OID for DNS-based is not required as the URI
+   			                  already contains the transport -->
+   			<!--
+   			The new access method OID is defined as follows:
+   		</t>
+   		<figure><artwork>
+      id-ad-ocsp-dns OBJECT IDENTIFIER ::= { id-ad 3 }
+        </artwork></figure>
+
+		<t>
+			When the id-ad-ocsp-dns appears as accessMethod, the accessLocation field
+			describes the location of the OCSP response related to the certificate the
+			extension appears in and its syntax should follow the specifications in
+			<xref target="RFC4501" /> for DNS URIs.
+		</t>
+		-->
+		<t>
+			Please note that, when using this accessMethod, the use of the dnsathority
+			in the specified URI is discouraged as this might reduce the benefits coming
+			from the caching infrastructure of DNS and, possibly, overload the referred
+			DNS server.
+		</t>
+
+		<section anchor="urldef" title="URL definition">
+			<t>
+				A DNS URL <xref target="RFC3986" /> begins with the protocol prefix "dns"
+				and is defined by the following grammar, following the ABNF notation defined in
+				<xref target="RFC5234"/>.
+			</t>
+
+			<figure><artwork>
+      dnsurl = scheme COLON SLASH SLASH [target]
+              [QUESTION [ TYPE=rr_type ]
+              ; target: is the dns entry for
+              ; the lookup operation.
+              ; rr_type: is the type of record
+              ; to be retrieved. If not specified,
+              ; the default type is OCSPRR
+
+      scheme  = "dns"
+  
+      SLASH       = %x2F              ; forward slash ("/")
+      COLON       = %x3A              ; colon (":")
+      QUESTION    = %x3F              ; question mark ("?")
+      TYPE        = "type"            ; the keyword ("type")
+            </artwork></figure>
+
+            <!-- @deprecated: the distinction between "dns" and "dnssec" is irrelevant
+                              at the application layer -->
+            <!--
+			<t>
+				The "dns" prefix indicates an entry or entries accessible from the
+				configured DNS server. The "dnssec" prefix indicates, instead, an entry or
+				entries that are expected to be accessible via the DNSSEC protocol and
+				verification of the returned data SHOULD be performed at the resolver level.
+				Applications capable of correctly process DNSSEC authentication information
+				MAY also verify the returned data authenticity. However, given the fact that
+				the retrieved data already carries its own authentication, this step is not
+				required at the application level.
+			</t>
+			-->
+
+			<t>
+				Although this specification does not mandate for any specific format for the
+				&lt;target&gt; component of the DNS URL, some examples are provided in <xref target="uri_samples" />
+				with the intent to illustrate, not define, the format.
+			</t>
+
+		</section>
+
+		<!-- @deprecated: the suggestion about using TXT might confuse deployers and then applications
+		                  will have to support multiple records types. Removed as suggested by DNSOP -->
+		<!--
+		<section anchor="txt_records" title="Use of TXT Records">
+			<t>
+				Although conforming CAs SHOULD use OCSP RR for distributing OCSP responses via DNS, to allow
+				for early adoption of the transport mechanism, CAs MAY use TXT records for this purpose.
+
+				In this case, CAs shall use ``TXT'' as the &gt;type&lt; component of the DNS URL and MUST
+				base64 encode the value of the OCSP responses when adding them to the corresponding DNS
+				entry.
+
+				Conforming clients MAY support the ``TXT'' record type and MUST support the ``OCSPRR''
+				record type for the retrieval of OCSP responses via DNS.
+			</t>
+		</section>
+		-->
+
+		<section anchor="uriproc" title="DNS URL Processing">
+			<t>
+				In order to process the OCSP DNS URLs in a certificate, clients have to extract the &lt;target&gt;
+				and, if provided, the &lt;type&gt; of record from the URL. After that, client MUST query for the
+				specified record.
+					
+				When the ``OCSPRR'' record type is used, the returned value MUST contain the DER encoded
+				OCSP response related to the certificate that the client is going to validate.
+
+				<!-- @deprecated -->
+				<!--
+				When the ``TXT'' record type is used, the returned value MUST contain the base64 representation
+				of the DER encoded OCSP response related to the certificate that the client is going to validate.
+				-->
+			</t>
+		</section>
+
+		<section anchor="uri_samples" title="OCSPRR URI Examples">
+			<t>
+				When using the issuing CA's DNS sub-domain in the DNS URL, the hex (or decimal) representation
+				of the certificate's serialNumber MAY be used as the hostname of the DNS URL. 
+				When combined with the specific sub-domain of the issuing CA this provides a unique
+				entry that can be easily queried. For example, given that the sub-domain of the
+				issuing CA is "ca1.example.com", the resulting URL in the issued certificate can
+				be constructed as follows:
+			</t>
+			<figure><artwork>
+      dns://04A3E45534A1B5.ca1.example.com?type=OCSPRR
+            </artwork></figure>
+
+			<t>
+				Because the serialNumber of a certificate is guaranteed to be unique within a (single) CA,
+				different Certification Authorities MUST use different sub-domains when using this publication
+				algorithm to avoid collisions across different CAs. 
+			</t>
+			<t>
+				However, in some environments, the serial number that will be used in the certificate to be
+				issued can not be pre-fetched and embedded in the AIA's DNS URL entry. In this case, the use of
+				a monotonically increasing or random integer number can be used instead.
+			</t>
+			<t>
+				In any case, it is important to notice that since the DNS entry is to be used "AS IS" by the
+				relying party that wants to fetch the OCSP response by using the DNS URL, other techniques (e.g.,
+				the use of prefixes for different issuing CAs combined with high-resolution clock entries
+				and small random or monotonic integer suffixes) can be implemented independently by different
+				Certificate Service Providers.
+			</t>
+
+		</section>
+
+	</section>
+
+	<section anchor="iana" title="IANA Considerations">
+		<t>
+			This document uses a new DNS RR type, OCSPRR, whose value (TBD) MUST be allocated by IANA from
+			the Resource Record (RR) TYPEs subregistry of the Domain Name System (DNS) Parameters registry.
+		</t>
+	</section>
+
+
+	<section anchor="security" title="Security Considerations">
+		<t>
+			Several security considerations need to be explicitly considered for the system administrators
+			and application developers to understand the weaknesses of the overall architecture.
+
+			It is important to highlight, however, that the following considerations are inherently derived
+			from the nature of the DNS infrastructure and that deployment of the DNSSEC protocol might
+			provide an efficient protection against them.
+		</t>
+
+		<t>
+			By lacking the ability to authenticate the originating server directly, the DNS (not DNSSEC)
+			protocol (both in TCP and UDP mode) is vulnerable to attacks where false responses are provided.
+
+			Although all the information stored in the OCSP RR is signed, the data returned to the client
+			could potentially be altered (e.g., by providing an empty or old response). This type of attack
+			can lead to the application's inability to retrieve the revocation information, thus this
+			approach is vulnerable to Denial of Service (DoS), Man-in-the-middle (MITM), and Reply Attacks.
+		</t>
+		<t>
+			As mentioned earlier, the deployment of DNSSEC can help in mitigating the described family of
+			attacks by providing a mean for the client (or its resolver) to verify signatures of the DNS
+			records themselves via the DNS keys.
+
+			This said, the use of DNS (instead of DNSSEC) is equivalent, from a security considerations
+			point of view, to today's deployment best practices for OCSP where pre-computed responses are
+			delivered by CDNs via HTTP (not HTTPS).
+
+			Therefore, the provisioning of OCSP responses via DNS does not lower or alter the security
+			considerations that apply to the use of OCSP.
+
+			Last but not least, because of the availability (in most cases) of independent DNS servers that
+			an application can query, the use of multiple requests to different DNS servers (for the same
+			DNS record) might be implemented as a mitigating measure in case an attack is suspected or
+			detected.
+		</t>
+
+	</section>
+
+	<section anchor="acks" title="Acknowledgments">
+		<t>
+			The authors would like to thank everybody who provided insightful comments and helped in the
+			definition of the deployment considerations. In particular, the authors would like to thank
+			Scott A. Rea for his support. We also would like to thank DigiCert and the initial discussion
+			and support for the initial idea. Last but not least, the authors would like to thank all
+			the people that expressed interest in implementing support for this proposal.
+		</t>
+	</section>
+
+</middle>
+
+<back>
+<references title='Normative References'>
+
+&rfc5234;
+&rfc3986;
+&rfc2119;
+&rfc2560;
+&rfc5019;
+&rfc5280;
+&rfc4501;
+
+</references>
+
+</back>
+</rfc>
+
+
+
